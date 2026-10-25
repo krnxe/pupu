@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fff7ed">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="噗噗大作战">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>噗噗大作战 · 双人计数</title>
+<style>
+  :root{--bg:#fff7ed;--card:#ffffff;--ink:#292524;--sub:#78716c;--brand:#f59e0b;--brand2:#ef4444;--line:#fde68a;--mine:#fef3c7;--hers:#ffe4e6}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:520px;margin:0 auto;padding:16px 14px 90px}
+  header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 10px}
+  h1{font-size:22px;margin:0}
+  .sub{color:var(--sub);font-size:12px;margin-top:2px}
+  button{font-family:inherit;cursor:pointer;border:none}
+  .iconbtn{background:#fff;border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:13px}
+  .card{background:var(--card);border:1px solid #ffedd5;border-radius:18px;padding:14px;margin:12px 0;box-shadow:0 2px 10px rgba(245,158,11,.06)}
+  .bigbtn{width:100%;padding:26px 10px;border-radius:22px;background:linear-gradient(135deg,#fbbf24,#f97316);color:#fff;font-size:26px;font-weight:800;box-shadow:0 10px 24px rgba(249,115,22,.35)}
+  .bigbtn:active{transform:scale(.98)}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .ghost{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;font-size:14px}
+  .vs{display:flex;align-items:center;gap:10px}
+  .vs .who{flex:1;text-align:center}
+  .vs .num{font-size:30px;font-weight:800}
+  .bar{height:10px;background:#f5f5f4;border-radius:99px;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%}
+  .tabs{display:flex;gap:6px;margin:8px 0}
+  .tab{flex:1;padding:8px;border-radius:99px;background:#fff;border:1px solid var(--line);font-size:14px}
+  .tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+  .chip{padding:8px 12px;border-radius:99px;background:#fafaf9;border:1.5px solid #e7e5e4;font-size:14px}
+  .chip.on{background:var(--mine);border-color:var(--brand);font-weight:700}
+  .label{font-size:13px;color:var(--sub);margin:12px 0 2px}
+  .rec{border-bottom:1px dashed #e7e5e4;padding:10px 2px}
+  .rec:last-child{border-bottom:none}
+  .rec .meta{font-size:12px;color:var(--sub)}
+  .tags{font-size:13px;margin-top:4px;line-height:1.7}
+  .react{font-size:13px;background:#fafaf9;border:1px solid #e7e5e4;border-radius:99px;padding:3px 9px;margin-right:6px}
+  .react.mine{background:var(--hers);border-color:#fda4af}
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;z-index:30}
+  .sheet.open{display:block}
+  .panel{position:absolute;left:0;right:0;bottom:0;max-height:88vh;overflow:auto;background:#fff;border-radius:22px 22px 0 0;padding:18px 16px 30px;max-width:520px;margin:0 auto}
+  input,textarea{width:100%;padding:11px;border:1.5px solid #e7e5e4;border-radius:12px;font-size:15px;font-family:inherit;margin:4px 0 10px}
+  .primary{width:100%;padding:13px;border-radius:14px;background:var(--ink);color:#fff;font-size:16px;font-weight:700}
+  .warn{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.6}
+  .heat{display:grid;grid-template-columns:repeat(14,1fr);gap:4px;margin-top:8px}
+  .heat i{aspect-ratio:1;border-radius:4px;background:#f5f5f4;display:block}
+  .heat .h1{background:#fde68a}.heat .h2{background:#fbbf24}.heat .h3{background:#f97316}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(80px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:99px;font-size:14px;transition:.25s;z-index:50;max-width:88vw;text-align:center}
+  #toast.show{transform:translateX(-50%) translateY(0)}
+  .small{font-size:12px;color:var(--sub);line-height:1.6}
+  .del{color:#dc2626;font-size:13px;background:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>💩 噗噗大作战</h1><div class="sub" id="statusLine">只属于你们两个人的计数器</div></div>
+    <button class="iconbtn" id="btnSettings">⚙️ 设置</button>
+  </header>
+
+  <div class="warn" id="setupWarn" style="display:none">
+    现在是<b>本地试玩模式</b>：记录只存在这台手机上，对方看不到。<br>
+    点右上角「设置」，填入云数据库地址、Publishable Key 和配对码，就能双人联网同步。
+  </div>
+
+  <div class="card">
+    <button class="bigbtn" id="btnAdd">💩 记一笔</button>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="btnBackfill">🕐 补记一次</button>
+      <button class="ghost" id="btnRefresh">🔄 刷新数据</button>
+    </div>
+    <div class="vs" style="margin-top:16px">
+      <div class="who"><div class="small">我（<span id="myName1">我</span>）今日</div><div class="num" id="myToday">0</div></div>
+      <div style="font-weight:800;color:var(--sub)">VS</div>
+      <div class="who"><div class="small">对方（<span id="herName1">对方</span>）今日</div><div class="num" id="herToday">0</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800">🏆 次数比拼 <span class="small" id="winnerLine"></span></div>
+    <div class="tabs">
+      <button class="tab" data-period="week">本周</button>
+      <button class="tab on" data-period="month">本月</button>
+      <button class="tab" data-period="year">今年</button>
+      <button class="tab" data-period="all">总计</button>
+    </div>
+    <div>
+      <div class="row" style="justify-content:space-between"><span>🧑 <span id="myName2">我</span></span><b id="myCount">0 次</b></div>
+      <div class="bar"><i id="myBar" style="background:#f59e0b;width:0%"></i></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="row" style="justify-content:space-between"><span>💗 <span id="herName2">对方</span></span><b id="herCount">0 次</b></div>
+      <div class="bar"><i id="herBar" style="background:#f43f5e;width:0%"></i></div>
+    </div>
+    <div class="small" id="statLine" style="margin-top:10px"></div>
+    <div class="label">最近 28 天（我的记录热度）</div>
+    <div class="heat" id="heat"></div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800">📜 动态</div>
+    <div id="timeline"><div class="small">还没有记录，点上面记第一笔吧。</div></div>
+  </div>
+
+  <div class="small" style="text-align:center">超过 3 天没有任何记录时，记得关心一下肠胃哦（仅提醒，不做诊断）· 数据可于设置中导出 CSV</div>
+</div>
+
+<!-- 详情 / 补填面板 -->
+<div class="sheet" id="sheet">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b style="font-size:17px">这次的详情</b>
+      <button class="iconbtn" id="sheetClose">✕ 关闭</button>
+    </div>
+    <div class="small" id="sheetTime"></div>
+    <div id="fields"></div>
+    <div class="label">备注（可选）</div>
+    <textarea id="noteInput" rows="2" placeholder="比如：火锅后……"></textarea>
+    <button class="primary" id="btnSaveDetail">保存详情</button>
+    <div style="text-align:center;margin-top:10px"><button class="del" id="btnDelete">删除这条记录</button></div>
+  </div>
+</div>
+
+<!-- 设置面板 -->
+<div class="sheet" id="settingsSheet">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b style="font-size:17px">⚙️ 设置 / 联网配置</b>
+      <button class="iconbtn" id="settingsClose">✕ 关闭</button>
+    </div>
+    <div class="label">我的昵称</div>
+    <input id="cfgName" placeholder="比如：渊 / 宝宝">
+    <div class="label">云数据库地址（Project URL）</div>
+    <input id="cfgUrl" placeholder="https://xxxx.supabase.co">
+    <div class="label">Publishable Key（以 sb_publishable_ 开头，或旧版 anon key）</div>
+    <input id="cfgKey" placeholder="只填这个公开 Key，千万别填 secret / service_role">
+    <div class="label">配对码（你俩必须填得一模一样）</div>
+    <input id="cfgRoom" placeholder="8 位随机码，可点下方生成">
+    <button class="ghost" id="btnGenRoom" style="width:100%">🎲 生成新配对码</button>
+    <div class="small" style="margin:8px 0">使用方法：一个人生成配对码，把「数据库地址 + Key + 配对码」三样发给对方，对方填入自己的设置即可。她填她的昵称，你填你的。</div>
+    <button class="primary" id="btnSaveCfg">保存并连接</button>
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="btnExport">⬇️ 导出 CSV</button>
+      <button class="ghost" id="btnLocal">本地试玩模式</button>
+    </div>
+  </div>
+</div>
+
+<!-- 补记面板 -->
+<div class="sheet" id="backfillSheet">
+  <div class="panel">
+    <b style="font-size:17px">🕐 补记一次</b>
+    <div class="label">发生时间</div>
+    <input type="datetime-local" id="backfillTime">
+    <button class="primary" id="btnDoBackfill">保存这一次</button>
+    <div style="text-align:center;margin-top:8px"><button class="iconbtn" id="backfillClose">取消</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ---------------- 基础配置与状态 ---------------- */
+const LS_CFG='pupu_cfg_v1', LS_LOCAL='pupu_local_v1', LS_CUSTOM='pupu_custom_v1';
+const DEFAULTS={
+  smoothness:[['🚀','一泻千里'],['😌','很顺畅'],['😐','一般'],['😖','有点费劲'],['🧱','堵住了']],
+  feeling:[['😍','爽飞了'],['😊','舒服'],['😐','没啥感觉'],['😣','肚子疼'],['🥵','火辣辣']],
+  amount:[['🤏','一点点'],['🐇','小坨'],['💩','正常量'],['🐘','量很大'],['🌋','大爆发']],
+  texture:[['🌵','干硬'],['🥜','偏干'],['🍌','标准香蕉状'],['🍦','偏软'],['💧','稀的'],['🌊','全是水']],
+  duration:[['⚡','3分钟内'],['🚶','3-5分钟'],['📱','5-10分钟'],['🕐','10分钟以上']]
+};
+const FIELD_LABELS={smoothness:'顺畅度',feeling:'感觉',amount:'量',texture:'干湿 / 形态',duration:'耗时'};
+const REACT_EMOJIS=['❤️','😂','👏','💩'];
+let cfg=load(LS_CFG,{})||{};
+/* 预填配置（最终版）：云端地址与 Publishable Key 已内置，打开只需填昵称和配对码 */
+const PRECONFIG={url:'https://byfhvdawmesvhyqyepce.supabase.co',key:'sb_publishable_2IoTKXniLRJ3Rx8R2CkjzA_KN03-GLm'};
+if(!cfg.preconfigured){cfg.preconfigured=true;if(!cfg.url){cfg.url=PRECONFIG.url;cfg.key=PRECONFIG.key;}}
+if(!cfg.deviceId){cfg.deviceId='dev-'+Math.random().toString(36).slice(2,10);}
+save(LS_CFG,cfg);
+let records=[],reactions=[],period='month',editingId=null,editingSel={};
+function load(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v;}catch(e){return d;}}
+function save(k,v){localStorage.setItem(k,JSON.stringify(v));}
+function isCloud(){return !!(cfg.url&&cfg.key&&cfg.room);}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmt(dt){const d=new Date(dt);const p=n=>String(n).padStart(2,'0');const today=new Date();const sameDay=d.toDateString()===today.toDateString();const y=new Date(Date.now()-864e5).toDateString()===d.toDateString();return (sameDay?'今天':y?'昨天':(d.getMonth()+1)+'/'+d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+function customOpts(){return load(LS_CUSTOM,{});}
+function allOpts(field){return DEFAULTS[field].concat(customOpts()[field]||[]);}
+
+/* ---------------- 数据层：云端 / 本地 ---------------- */
+async function api(path,opts){
+  opts=opts||{};opts.headers=Object.assign({'apikey':cfg.key,'Authorization':'Bearer '+cfg.key,'Content-Type':'application/json'},opts.headers||{});
+  const r=await fetch(cfg.url.replace(/\/$/,'')+'/rest/v1/'+path,opts);
+  if(!r.ok){throw new Error('云端返回 '+r.status);}
+  const txt=await r.text();return txt?JSON.parse(txt):null;
+}
+async function fetchAll(){
+  if(!isCloud()){
+    const local=load(LS_LOCAL,{records:[],reactions:[]});
+    records=local.records;reactions=local.reactions;render();return;
+  }
+  try{
+    const room=encodeURIComponent(cfg.room);
+    records=await api('poop_records?room_code=eq.'+room+'&order=occurred_at.desc&limit=500')||[];
+    reactions=await api('poop_reactions?room_code=eq.'+room+'&limit=1000')||[];
+    document.getElementById('statusLine').textContent='☁️ 已联网 · 房间 '+cfg.room+' · 每 15 秒自动刷新';
+    render();
+  }catch(e){toast('连接云端失败，请检查设置里的地址和 Key');}
+}
+function persistLocal(){save(LS_LOCAL,{records,reactions});}
+async function createRecord(occurredAt){
+  const rec={room_code:cfg.room||'local',author_id:cfg.deviceId,author_name:cfg.name||'我',occurred_at:new Date(occurredAt).toISOString()};
+  if(isCloud()){
+    const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(rec)});
+    return out[0];
+  }
+  rec.id='local-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);rec.created_at=new Date().toISOString();
+  records.unshift(rec);persistLocal();return rec;
+}
+async function updateRecord(id,patch){
+  if(isCloud()){await api('poop_records?id=eq.'+id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(patch)});}
+  else{const r=records.find(x=>x.id===id);if(r)Object.assign(r,patch);persistLocal();}
+}
+async function deleteRecord(id){
+  if(isCloud()){await api('poop_records?id=eq.'+id,{method:'DELETE'});}
+  else{records=records.filter(x=>x.id!==id);reactions=reactions.filter(x=>x.record_id!==id);persistLocal();}
+}
+async function toggleReaction(rec,emoji){
+  const mine=reactions.find(x=>x.record_id===rec.id&&x.reactor_id===cfg.deviceId&&x.emoji===emoji);
+  if(mine){
+    if(isCloud())await api('poop_reactions?id=eq.'+mine.id,{method:'DELETE'});
+    else reactions=reactions.filter(x=>x.id!==mine.id);
+  }else{
+    const row={room_code:cfg.room||'local',record_id:rec.id,reactor_id:cfg.deviceId,reactor_name:cfg.name||'我',emoji};
+    if(isCloud()){const out=await api('poop_reactions',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(row)});reactions.push(out[0]);}
+    else{row.id='r-'+Date.now();reactions.push(row);}
+  }
+  if(!isCloud())persistLocal();
+}
+
+/* ---------------- 渲染 ---------------- */
+function periodStart(p){
+  const now=new Date();const d=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  if(p==='week'){const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);}
+  if(p==='month'){d.setDate(1);}
+  if(p==='year'){d.setMonth(0,1);}
+  if(p==='all')return new Date(0);
+  return d;
+}
+function splitCounts(list){
+  let mine=0,her=0,herName='';
+  list.forEach(r=>{if(r.author_id===cfg.deviceId)mine++;else{her++;herName=r.author_name||herName;}});
+  return{mine,her,herName};
+}
+function render(){
+  document.getElementById('setupWarn').style.display=isCloud()?'none':'block';
+  const myName=cfg.name||'我';
+  const todayStart=new Date();todayStart.setHours(0,0,0,0);
+  const today=records.filter(r=>new Date(r.occurred_at)>=todayStart);
+  const t=splitCounts(today);
+  const herName=t.herName||splitCounts(records).herName||'对方';
+  ['myName1','myName2'].forEach(id=>document.getElementById(id).textContent=myName);
+  ['herName1','herName2'].forEach(id=>document.getElementById(id).textContent=herName);
+  document.getElementById('myToday').textContent=t.mine;
+  document.getElementById('herToday').textContent=t.her;
+  const start=periodStart(period);
+  const inP=records.filter(r=>new Date(r.occurred_at)>=start);
+  const c=splitCounts(inP);
+  document.getElementById('myCount').textContent=c.mine+' 次';
+  document.getElementById('herCount').textContent=c.her+' 次';
+  const max=Math.max(c.mine,c.her,1);
+  document.getElementById('myBar').style.width=(c.mine/max*100)+'%';
+  document.getElementById('herBar').style.width=(c.her/max*100)+'%';
+  document.getElementById('winnerLine').textContent=
+    c.mine===c.her?(inP.length?'· 暂时打平 🤝':''):(c.mine>c.her?'· 我领先 '+(c.mine-c.her)+' 次 👑':'· 对方领先 '+(c.her-c.mine)+' 次 👑');
+  /* 小统计 */
+  const myRecs=records.filter(r=>r.author_id===cfg.deviceId);
+  const days=new Set(myRecs.map(r=>new Date(r.occurred_at).toDateString())).size;
+  const avg=records.length&&myRecs.length?(myRecs.length/Math.max(days,1)).toFixed(1):'0';
+  let lastGap='';
+  if(myRecs.length){const hrs=Math.round((Date.now()-new Date(myRecs[0].occurred_at))/36e5);lastGap=' · 我距上次 '+hrs+' 小时';}
+  document.getElementById('statLine').textContent='我累计 '+myRecs.length+' 次 · 有记录 '+days+' 天 · 日均（按活跃天）'+avg+' 次'+lastGap;
+  /* 热力图：最近 28 天我的次数 */
+  const heat=document.getElementById('heat');heat.innerHTML='';
+  for(let i=27;i>=0;i--){
+    const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-i);
+    const n=myRecs.filter(r=>new Date(r.occurred_at).toDateString()===d.toDateString()).length;
+    const cell=document.createElement('i');if(n)cell.className='h'+Math.min(n,3);cell.title=d.toLocaleDateString()+'：'+n+' 次';heat.appendChild(cell);
+  }
+  /* 动态流 */
+  const tl=document.getElementById('timeline');
+  if(!records.length){tl.innerHTML='<div class="small">还没有记录，点上面记第一笔吧。</div>';return;}
+  tl.innerHTML='';
+  records.slice(0,60).forEach(r=>{
+    const div=document.createElement('div');div.className='rec';
+    const tags=[r.smoothness,r.feeling,r.amount,r.texture,r.duration].filter(Boolean).map(esc).join(' · ');
+    const mine=r.author_id===cfg.deviceId;
+    let reactHtml=REACT_EMOJIS.map(e=>{
+      const list=reactions.filter(x=>x.record_id===r.id&&x.emoji===e);
+      const hasMine=list.some(x=>x.reactor_id===cfg.deviceId);
+      return '<button class="react'+(hasMine?' mine':'')+'" data-react="'+e+'" data-id="'+r.id+'">'+e+(list.length?' '+list.length:'')+'</button>';
+    }).join('');
+    div.innerHTML='<div><b>'+(mine?'🧑':'💗')+' '+esc(r.author_name)+'</b> <span class="meta">'+fmt(r.occurred_at)+'</span>'+
+      (mine?' <button class="del" data-edit="'+r.id+'">编辑</button>':'')+'</div>'+
+      (tags?'<div class="tags">'+tags+'</div>':'')+
+      (r.note?'<div class="tags">📝 '+esc(r.note)+'</div>':'')+
+      '<div style="margin-top:6px">'+reactHtml+'</div>';
+    tl.appendChild(div);
+  });
+  tl.querySelectorAll('[data-react]').forEach(b=>b.onclick=async()=>{
+    const rec=records.find(x=>x.id===b.dataset.id);
+    try{await toggleReaction(rec,b.dataset.react);await fetchAll();}catch(e){toast('操作失败，请稍后再试');}
+  });
+  tl.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openSheet(b.dataset.edit));
+}
+
+/* ---------------- 详情面板 ---------------- */
+function openSheet(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  const same=(editingId===id);
+  editingId=id;
+  if(!same)editingSel={smoothness:r.smoothness||'',feeling:r.feeling||'',amount:r.amount||'',texture:r.texture||'',duration:r.duration||''};
+  document.getElementById('sheetTime').textContent=fmt(r.occurred_at)+' · '+r.author_name+' 的记录';
+  document.getElementById('noteInput').value=r.note||'';
+  const box=document.getElementById('fields');box.innerHTML='';
+  Object.keys(DEFAULTS).forEach(field=>{
+    const lab=document.createElement('div');lab.className='label';lab.textContent=FIELD_LABELS[field];box.appendChild(lab);
+    const chips=document.createElement('div');chips.className='chips';
+    allOpts(field).forEach(([e,t])=>{
+      const label=e+' '+t;const btn=document.createElement('button');btn.className='chip'+(editingSel[field]===label?' on':'');btn.textContent=label;
+      btn.onclick=()=>{editingSel[field]=editingSel[field]===label?'':label;openSheetRefreshChips();};
+      chips.appendChild(btn);
+    });
+    const add=document.createElement('button');add.className='chip';add.textContent='＋ 自定义';
+    add.onclick=()=>{
+      const emoji=prompt('输入一个 emoji（比如 🔥）');if(!emoji)return;
+      const text=prompt('输入选项文字（比如：酣畅淋漓）');if(!text)return;
+      const all=customOpts();(all[field]=all[field]||[]).push([emoji,text]);save(LS_CUSTOM,all);
+      editingSel[field]=emoji+' '+text;openSheet(editingId);
+    };
+    chips.appendChild(add);box.appendChild(chips);
+  });
+  document.getElementById('sheet').classList.add('open');
+}
+function openSheetRefreshChips(){const id=editingId;const note=document.getElementById('noteInput').value;openSheet(id);document.getElementById('noteInput').value=note;}
+
+/* ---------------- 事件绑定 ---------------- */
+document.getElementById('btnAdd').onclick=async()=>{
+  try{const rec=await createRecord(Date.now());toast('✅ 已记一笔！可以补一下这次的感觉');await fetchAll();openSheet(rec.id);}
+  catch(e){toast('保存失败，请检查联网配置');}
+};
+document.getElementById('btnRefresh').onclick=()=>{fetchAll();toast('已刷新');};
+document.getElementById('sheetClose').onclick=()=>document.getElementById('sheet').classList.remove('open');
+document.getElementById('btnSaveDetail').onclick=async()=>{
+  try{await updateRecord(editingId,Object.assign({},editingSel,{note:document.getElementById('noteInput').value.trim()||null}));
+    document.getElementById('sheet').classList.remove('open');toast('详情已保存');await fetchAll();}
+  catch(e){toast('保存失败，请稍后再试');}
+};
+document.getElementById('btnDelete').onclick=async()=>{
+  if(!confirm('确定删除这条记录吗？'))return;
+  try{await deleteRecord(editingId);document.getElementById('sheet').classList.remove('open');toast('已删除');await fetchAll();}
+  catch(e){toast('删除失败');}
+};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');period=t.dataset.period;render();});
+/* 补记 */
+const bf=document.getElementById('backfillSheet');
+document.getElementById('btnBackfill').onclick=()=>{const n=new Date();n.setMinutes(n.getMinutes()-n.getTimezoneOffset());document.getElementById('backfillTime').value=n.toISOString().slice(0,16);bf.classList.add('open');};
+document.getElementById('backfillClose').onclick=()=>bf.classList.remove('open');
+document.getElementById('btnDoBackfill').onclick=async()=>{
+  const v=document.getElementById('backfillTime').value;if(!v)return;
+  try{const rec=await createRecord(new Date(v).getTime());bf.classList.remove('open');toast('✅ 已补记');await fetchAll();openSheet(rec.id);}
+  catch(e){toast('补记失败，请检查联网配置');}
+};
+/* 设置 */
+const ss=document.getElementById('settingsSheet');
+document.getElementById('btnSettings').onclick=()=>{
+  document.getElementById('cfgName').value=cfg.name||'';
+  document.getElementById('cfgUrl').value=cfg.url||'';
+  document.getElementById('cfgKey').value=cfg.key||'';
+  document.getElementById('cfgRoom').value=cfg.room||'';
+  ss.classList.add('open');
+};
+document.getElementById('settingsClose').onclick=()=>ss.classList.remove('open');
+document.getElementById('btnGenRoom').onclick=()=>{document.getElementById('cfgRoom').value=Math.random().toString(36).slice(2,6).toUpperCase()+Math.random().toString(36).slice(2,6).toUpperCase();};
+document.getElementById('btnSaveCfg').onclick=async()=>{
+  cfg.name=document.getElementById('cfgName').value.trim();
+  cfg.url=document.getElementById('cfgUrl').value.trim();
+  cfg.key=document.getElementById('cfgKey').value.trim();
+  cfg.room=document.getElementById('cfgRoom').value.trim();
+  save(LS_CFG,cfg);ss.classList.remove('open');toast(isCloud()?'正在连接云端…':'已保存（本地模式）');await fetchAll();
+};
+document.getElementById('btnLocal').onclick=()=>{cfg.url='';cfg.key='';cfg.room='';save(LS_CFG,cfg);ss.classList.remove('open');fetchAll();toast('已切换本地试玩模式');};
+document.getElementById('btnExport').onclick=()=>{
+  const head='时间,记录人,顺畅度,感觉,量,干湿,耗时,备注\n';
+  const lines=records.map(r=>[new Date(r.occurred_at).toLocaleString(),r.author_name,r.smoothness||'',r.feeling||'',r.amount||'',r.texture||'',r.duration||'',(r.note||'').replace(/,/g,'，')].join(','));
+  const blob=new Blob(['\ufeff'+head+lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='噗噗记录.csv';a.click();
+};
+/* 启动 + 自动刷新 */
+fetchAll();
+setInterval(()=>{if(isCloud()&&!document.querySelector('.sheet.open'))fetchAll();},15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&isCloud())fetchAll();});
+</script>
+</body>
+</html>
