@@ -144,6 +144,16 @@
     <input id="cfgUrl" placeholder="https://xxxx.supabase.co">
     <div class="label">Publishable Key（以 sb_publishable_ 开头，或旧版 anon key）</div>
     <input id="cfgKey" placeholder="只填这个公开 Key，千万别填 secret / service_role">
+    <div class="label">数据库后端（云端断连就选国内这个）</div>
+    <select id="cfgBackend"><option value="supabase">Supabase（海外）</option><option value="leancloud">LeanCloud（国内）</option></select>
+    <div id="lcFields" style="display:none">
+      <div class="label">LeanCloud App ID</div>
+      <input id="cfgLcId" placeholder="控制台 → 设置 → 应用凭证">
+      <div class="label">LeanCloud App Key（客户端 Key）</div>
+      <input id="cfgLcKey" placeholder="只填 App Key，千万别填 Master Key">
+      <div class="label">REST API 服务器地址</div>
+      <input id="cfgLcServer" placeholder="https://xxxx.api.lncld.net">
+    </div>
     <div class="label">配对码（你俩必须填得一模一样）</div>
     <input id="cfgRoom" placeholder="8 位随机码，可点下方生成">
     <button class="ghost" id="btnGenRoom" style="width:100%">🎲 生成新配对码</button>
@@ -221,7 +231,10 @@ function savePending(){save('pupu_pending_v1',pending);}
 function savePendingOps(){save('pupu_pendingops_v1',pendingOps);}
 function load(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v;}catch(e){return d;}}
 function save(k,v){localStorage.setItem(k,JSON.stringify(v));}
-function isCloud(){return cfg.mode!=='local'&&!!(cfg.url&&cfg.key&&cfg.room);}
+function isCloud(){
+  if(cfg.mode==='local'||!cfg.room)return false;
+  return cfg.backend==='lc'?!!(cfg.lcId&&cfg.lcKey&&cfg.lcServer):!!(cfg.url&&cfg.key);
+}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(dt){const d=new Date(dt);const p=n=>String(n).padStart(2,'0');const today=new Date();const sameDay=d.toDateString()===today.toDateString();const y=new Date(Date.now()-864e5).toDateString()===d.toDateString();return (sameDay?'今天':y?'昨天':(d.getMonth()+1)+'/'+d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
@@ -238,15 +251,54 @@ async function api(path,opts){
     const txt=await r.text();return txt?JSON.parse(txt):null;
   }finally{clearTimeout(timer);}
 }
+
+/* ---------- LeanCloud（国内后端）适配层 ---------- */
+function lcBase(){return (cfg.lcServer||'').replace(/\/$/,'');}
+async function lcApi(method,p,body){
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),15000);
+  try{
+    const r=await fetch(lcBase()+p,{method:method,signal:ctl.signal,headers:{'X-LC-Id':cfg.lcId,'X-LC-Key':cfg.lcKey,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+    if(!r.ok)throw new Error('LeanCloud 返回 '+r.status);
+    const txt=await r.text();return txt?JSON.parse(txt):null;
+  }finally{clearTimeout(timer);}
+}
+function lcToRec(o){return {id:o.objectId,client_id:o.client_id||null,room_code:o.room_code,author_id:o.author_id,author_name:o.author_name,occurred_at:new Date(o.occurred_ms).toISOString(),created_at:o.createdAt,smooth:o.smooth||null,feeling:o.feeling||null,amount:o.amount||null,moisture:o.moisture||null,duration:o.duration||null,extras:o.extras||[]};}
+function recToLc(rec){return {room_code:rec.room_code,author_id:rec.author_id,author_name:rec.author_name,occurred_ms:new Date(rec.occurred_at).getTime(),smooth:rec.smooth||null,feeling:rec.feeling||null,amount:rec.amount||null,moisture:rec.moisture||null,duration:rec.duration||null,extras:rec.extras||[],client_id:rec.client_id||undefined};}
+function lcToReact(o){return {id:o.objectId,room_code:o.room_code,record_id:o.record_id,reactor_id:o.reactor_id,reactor_name:o.reactor_name,emoji:o.emoji,created_at:o.createdAt};}
+async function cloudFetchAll(){
+  if(cfg.backend==='lc'){
+    const w=encodeURIComponent(JSON.stringify({room_code:cfg.room}));
+    const rr=await lcApi('GET','/1.1/classes/PoopRecord?where='+w+'&order=-occurred_ms&limit=500');
+    const ra=await lcApi('GET','/1.1/classes/PoopReaction?where='+w+'&limit=1000');
+    return {records:(rr.results||[]).map(lcToRec),reactions:(ra.results||[]).map(lcToReact)};
+  }
+  const room=encodeURIComponent(cfg.room);
+  const records=await api('poop_records?room_code=eq.'+room+'&order=occurred_at.desc&limit=500')||[];
+  const reactions=await api('poop_reactions?room_code=eq.'+room+'&limit=1000')||[];
+  return {records:records,reactions:reactions};
+}
+async function cloudInsertRecord(rec){
+  if(cfg.backend==='lc'){const o=await lcApi('POST','/1.1/classes/PoopRecord?fetchWhenSave=true',recToLc(rec));return lcToRec(o);}
+  const b=Object.assign({},rec);delete b.id;delete b.pending;delete b.created_at;delete b.client_id;
+  const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(b)});
+  return out[0];
+}
+async function cloudUpdateRecord(id,patch){
+  if(cfg.backend==='lc'){await lcApi('PUT','/1.1/classes/PoopRecord/'+id,patch);return;}
+  await api('poop_records?id=eq.'+id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(patch)});
+}
+async function cloudDeleteRecord(id){
+  if(cfg.backend==='lc'){await lcApi('DELETE','/1.1/classes/PoopRecord/'+id);return;}
+  await api('poop_records?id=eq.'+id,{method:'DELETE'});
+}
 async function fetchAll(){
   if(!isCloud()){
     const local=load(LS_LOCAL,{records:[],reactions:[]});
     baseRecords=local.records;records=pending.concat(baseRecords);reactions=local.reactions;render();return;
   }
   try{
-    const room=encodeURIComponent(cfg.room);
-    baseRecords=await api('poop_records?room_code=eq.'+room+'&order=occurred_at.desc&limit=500')||[];
-    reactions=await api('poop_reactions?room_code=eq.'+room+'&limit=1000')||[];
+    const data=await cloudFetchAll();
+    baseRecords=data.records;reactions=data.reactions;
     records=pending.concat(baseRecords);
     document.getElementById('statusLine').textContent='☁️ 已联网 · 房间 '+cfg.room+(pending.length||pendingOps.length?' · 有记录待同步':' · 每 15 秒自动刷新');
     render();
@@ -265,12 +317,12 @@ async function syncPending(){
   try{
     for(const rec of [...pending]){
       const body=Object.assign({},rec);delete body.id;delete body.pending;delete body.created_at;
-      const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(body)});
-      pending=pending.filter(p=>p.id!==rec.id);savePending();baseRecords.unshift(out[0]);progressed=true;
+      const saved=await cloudInsertRecord(body);
+      pending=pending.filter(p=>p.id!==rec.id);savePending();baseRecords.unshift(saved);progressed=true;
     }
     for(const op of [...pendingOps]){
-      if(op.type==='update')await api('poop_records?id=eq.'+op.id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(op.patch)});
-      if(op.type==='delete')await api('poop_records?id=eq.'+op.id,{method:'DELETE'});
+      if(op.type==='update')await cloudUpdateRecord(op.id,op.patch);
+      if(op.type==='delete')await cloudDeleteRecord(op.id);
       pendingOps=pendingOps.filter(o=>o!==op);savePendingOps();progressed=true;
     }
   }catch(e){/* 网络还没恢复，队列保留，下次再试 */}
@@ -279,11 +331,10 @@ async function syncPending(){
 }
 function persistLocal(){save(LS_LOCAL,{records,reactions});}
 async function createRecord(occurredAt){
-  const rec={room_code:cfg.room||'local',author_id:cfg.deviceId,author_name:cfg.name||'我',occurred_at:new Date(occurredAt).toISOString()};
+  const rec={room_code:cfg.room||'local',author_id:cfg.deviceId,author_name:cfg.name||'我',occurred_at:new Date(occurredAt).toISOString(),client_id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7)};
   if(isCloud()){
     try{
-      const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(rec)});
-      return out[0];
+      return await cloudInsertRecord(rec);
     }catch(e){
       rec.id='local-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
       rec.pending=true;rec.created_at=new Date().toISOString();
@@ -298,7 +349,7 @@ async function updateRecord(id,patch){
   const pr=pending.find(x=>x.id===id);
   if(pr){Object.assign(pr,patch);savePending();const r0=records.find(x=>x.id===id);if(r0)Object.assign(r0,patch);return;}
   if(isCloud()){
-    try{await api('poop_records?id=eq.'+id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(patch)});}
+    try{await cloudUpdateRecord(id,patch);}
     catch(e){
       const r=records.find(x=>x.id===id);if(r)Object.assign(r,patch);
       const ex=pendingOps.find(o=>o.type==='update'&&o.id===id);
@@ -311,7 +362,7 @@ async function updateRecord(id,patch){
 async function deleteRecord(id){
   if(pending.some(x=>x.id===id)){pending=pending.filter(x=>x.id!==id);savePending();records=records.filter(x=>x.id!==id);return;}
   if(isCloud()){
-    try{await api('poop_records?id=eq.'+id,{method:'DELETE'});}
+    try{await cloudDeleteRecord(id);}
     catch(e){pendingOps.push({type:'delete',id:id});savePendingOps();toast('📥 网络不稳，删除已暂存，恢复后自动同步');}
     baseRecords=baseRecords.filter(x=>x.id!==id);records=records.filter(x=>x.id!==id);
   }
@@ -319,6 +370,11 @@ async function deleteRecord(id){
 }
 async function toggleReaction(rec,emoji){
   const mine=reactions.find(x=>x.record_id===rec.id&&x.reactor_id===cfg.deviceId&&x.emoji===emoji);
+  if(isCloud()&&cfg.backend==='lc'){
+    if(mine){await lcApi('DELETE','/1.1/classes/PoopReaction/'+mine.id);reactions=reactions.filter(x=>x.id!==mine.id);}
+    else{const row={room_code:cfg.room,record_id:rec.id,reactor_id:cfg.deviceId,reactor_name:cfg.name||'我',emoji};const o=await lcApi('POST','/1.1/classes/PoopReaction?fetchWhenSave=true',row);reactions.push(lcToReact(o));}
+    return;
+  }
   if(mine){
     if(isCloud())await api('poop_reactions?id=eq.'+mine.id,{method:'DELETE'});
     else reactions=reactions.filter(x=>x.id!==mine.id);
@@ -470,6 +526,11 @@ document.getElementById('btnSettings').onclick=()=>{
   document.getElementById('cfgUrl').value=cfg.url||'';
   document.getElementById('cfgKey').value=cfg.key||'';
   document.getElementById('cfgRoom').value=cfg.room||'';
+  document.getElementById('cfgBackend').value=cfg.backend||'supabase';
+  document.getElementById('cfgLcId').value=cfg.lcId||'';
+  document.getElementById('cfgLcKey').value=cfg.lcKey||'';
+  document.getElementById('cfgLcServer').value=cfg.lcServer||'';
+  document.getElementById('lcFields').style.display=cfg.backend==='lc'?'block':'none';
   if(typeof PRECONFIG!=='undefined'&&PRECONFIG){
     if(!document.getElementById('cfgUrl').value)document.getElementById('cfgUrl').value=PRECONFIG.url;
     if(!document.getElementById('cfgKey').value)document.getElementById('cfgKey').value=PRECONFIG.key;
@@ -484,7 +545,11 @@ document.getElementById('btnSaveCfg').onclick=async()=>{
   cfg.url=document.getElementById('cfgUrl').value.trim();
   cfg.key=document.getElementById('cfgKey').value.trim();
   cfg.room=document.getElementById('cfgRoom').value.trim();
-  if(cfg.url&&cfg.key)cfg.mode='cloud';
+  cfg.backend=document.getElementById('cfgBackend').value;
+  cfg.lcId=document.getElementById('cfgLcId').value.trim();
+  cfg.lcKey=document.getElementById('cfgLcKey').value.trim();
+  cfg.lcServer=document.getElementById('cfgLcServer').value.trim();
+  if(cfg.backend==='lc'?(cfg.lcId&&cfg.lcKey&&cfg.lcServer):(cfg.url&&cfg.key))cfg.mode='cloud';
   save(LS_CFG,cfg);ss.classList.remove('open');toast(isCloud()?'正在连接云端…':'已保存（本地模式）');await fetchAll();
 };
 document.getElementById('btnLocal').onclick=()=>{
@@ -505,6 +570,8 @@ document.getElementById('btnExport').onclick=()=>{
   const blob=new Blob(['\ufeff'+head+lines.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='噗噗记录.csv';a.click();
 };
+document.getElementById('cfgBackend').addEventListener('change',function(){document.getElementById('lcFields').style.display=this.value==='leancloud'?'block':'none';});
+
 /* ---------------- 邀请链接：一键配对 ---------------- */
 function b64e(obj){
   const bytes=new TextEncoder().encode(JSON.stringify(obj));
@@ -517,7 +584,7 @@ function b64d(str){
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 function buildInviteLink(){
-  const payload={u:cfg.url||'',k:cfg.key||'',r:cfg.room||'',n:cfg.name||''};
+  const payload={b:cfg.backend||'supabase',u:cfg.url||'',k:cfg.key||'',li:cfg.lcId||'',lk:cfg.lcKey||'',ls:cfg.lcServer||'',r:cfg.room||'',n:cfg.name||''};
   return location.origin+location.pathname+'#join='+b64e(payload);
 }
 let inviteData=null;
@@ -537,6 +604,10 @@ document.getElementById('btnDoJoin').onclick=()=>{
   if(!name){toast('先填一下你的昵称');document.getElementById('joinName').focus();return;}
   if(inviteData.u)cfg.url=inviteData.u;
   if(inviteData.k)cfg.key=inviteData.k;
+  if(inviteData.b)cfg.backend=inviteData.b;
+  if(inviteData.li)cfg.lcId=inviteData.li;
+  if(inviteData.lk)cfg.lcKey=inviteData.lk;
+  if(inviteData.ls)cfg.lcServer=inviteData.ls;
   cfg.room=inviteData.r;cfg.name=name;cfg.mode='cloud';cfg.preconfigured=true;
   save(LS_CFG,cfg);
   history.replaceState(null,'',location.pathname+location.search);
@@ -552,7 +623,8 @@ document.getElementById('joinCancel').onclick=()=>{
 };
 const shareSheet=document.getElementById('shareSheet');
 document.getElementById('btnInvite').onclick=async()=>{
-  if(!cfg.url||!cfg.key||!cfg.room){toast('先在设置里连好云端并生成/填好配对码，再来生成邀请');return;}
+  const hasCfg=cfg.backend==='lc'?!!(cfg.lcId&&cfg.lcKey&&cfg.lcServer&&cfg.room):!!(cfg.url&&cfg.key&&cfg.room);
+  if(!hasCfg){toast('先在设置里连好云端并生成/填好配对码，再来生成邀请');return;}
   const link=buildInviteLink();
   const text='来和我一起用噗噗大作战💩 点开链接，填昵称点确认就能加入：'+link;
   if(navigator.share){
@@ -572,7 +644,7 @@ document.getElementById('shareClose').onclick=()=>shareSheet.classList.remove('o
 /* 启动 + 自动刷新 */
 fetchAll();
 checkInvite();
-setInterval(()=>{if(isCloud()&&!document.querySelector('.sheet.open'))fetchAll();},15000);
+setInterval(()=>{if(isCloud()&&!document.hidden&&!document.querySelector('.sheet.open'))fetchAll();},30000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&isCloud())fetchAll();});
 window.addEventListener('online',()=>{if(isCloud()){toast('网络已恢复，正在同步…');fetchAll();}});
 </script>
