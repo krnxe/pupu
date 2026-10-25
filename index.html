@@ -68,8 +68,8 @@
   </header>
 
   <div class="warn" id="setupWarn" style="display:none">
-    现在是<b>本地试玩模式</b>：记录只存在这台手机上，对方看不到。<br>
-    点右上角「设置」，填入云数据库地址、Publishable Key 和配对码，就能双人联网同步。
+    现在是<b>本地模式</b>：记录只存在这台设备上，对方看不到，也不会同步到云端。<br>
+    切回云端不用重输任何东西：点右上角「设置」→「☁️ 退出本地试玩，恢复云端」即可（地址和 Key 都替你存着）。
   </div>
 
   <div class="card">
@@ -188,9 +188,14 @@ if(!cfg.preconfigured){cfg.preconfigured=true;if(!cfg.url){cfg.url=PRECONFIG.url
 if(!cfg.deviceId){cfg.deviceId='dev-'+Math.random().toString(36).slice(2,10);}
 save(LS_CFG,cfg);
 let records=[],reactions=[],period='month',editingId=null,editingSel={};
+let baseRecords=[];
+let pending=load('pupu_pending_v1',[]);
+let pendingOps=load('pupu_pendingops_v1',[]);
+function savePending(){save('pupu_pending_v1',pending);}
+function savePendingOps(){save('pupu_pendingops_v1',pendingOps);}
 function load(k,d){try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v;}catch(e){return d;}}
 function save(k,v){localStorage.setItem(k,JSON.stringify(v));}
-function isCloud(){return !!(cfg.url&&cfg.key&&cfg.room);}
+function isCloud(){return cfg.mode!=='local'&&!!(cfg.url&&cfg.key&&cfg.room);}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmt(dt){const d=new Date(dt);const p=n=>String(n).padStart(2,'0');const today=new Date();const sameDay=d.toDateString()===today.toDateString();const y=new Date(Date.now()-864e5).toDateString()===d.toDateString();return (sameDay?'今天':y?'昨天':(d.getMonth()+1)+'/'+d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
@@ -200,40 +205,91 @@ function allOpts(field){return DEFAULTS[field].concat(customOpts()[field]||[]);}
 /* ---------------- 数据层：云端 / 本地 ---------------- */
 async function api(path,opts){
   opts=opts||{};opts.headers=Object.assign({'apikey':cfg.key,'Authorization':'Bearer '+cfg.key,'Content-Type':'application/json'},opts.headers||{});
-  const r=await fetch(cfg.url.replace(/\/$/,'')+'/rest/v1/'+path,opts);
-  if(!r.ok){throw new Error('云端返回 '+r.status);}
-  const txt=await r.text();return txt?JSON.parse(txt):null;
+  const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),15000);opts.signal=ctl.signal;
+  try{
+    const r=await fetch(cfg.url.replace(/\/$/,'')+'/rest/v1/'+path,opts);
+    if(!r.ok){throw new Error('云端返回 '+r.status);}
+    const txt=await r.text();return txt?JSON.parse(txt):null;
+  }finally{clearTimeout(timer);}
 }
 async function fetchAll(){
   if(!isCloud()){
     const local=load(LS_LOCAL,{records:[],reactions:[]});
-    records=local.records;reactions=local.reactions;render();return;
+    baseRecords=local.records;records=pending.concat(baseRecords);reactions=local.reactions;render();return;
   }
   try{
     const room=encodeURIComponent(cfg.room);
-    records=await api('poop_records?room_code=eq.'+room+'&order=occurred_at.desc&limit=500')||[];
+    baseRecords=await api('poop_records?room_code=eq.'+room+'&order=occurred_at.desc&limit=500')||[];
     reactions=await api('poop_reactions?room_code=eq.'+room+'&limit=1000')||[];
-    document.getElementById('statusLine').textContent='☁️ 已联网 · 房间 '+cfg.room+' · 每 15 秒自动刷新';
+    records=pending.concat(baseRecords);
+    document.getElementById('statusLine').textContent='☁️ 已联网 · 房间 '+cfg.room+(pending.length||pendingOps.length?' · 有记录待同步':' · 每 15 秒自动刷新');
     render();
-  }catch(e){toast('连接云端失败，请检查设置里的地址和 Key');}
+    if(pending.length||pendingOps.length)syncPending();
+  }catch(e){
+    records=pending.concat(baseRecords);
+    document.getElementById('statusLine').textContent='⚠️ 云端暂时连不上：新记录会先存本地，恢复后自动同步';
+    render();
+  }
+}
+async function syncPending(){
+  if(!isCloud()||window._syncing)return;
+  if(!pending.length&&!pendingOps.length)return;
+  window._syncing=true;
+  let progressed=false;
+  try{
+    for(const rec of [...pending]){
+      const body=Object.assign({},rec);delete body.id;delete body.pending;delete body.created_at;
+      const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(body)});
+      pending=pending.filter(p=>p.id!==rec.id);savePending();baseRecords.unshift(out[0]);progressed=true;
+    }
+    for(const op of [...pendingOps]){
+      if(op.type==='update')await api('poop_records?id=eq.'+op.id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(op.patch)});
+      if(op.type==='delete')await api('poop_records?id=eq.'+op.id,{method:'DELETE'});
+      pendingOps=pendingOps.filter(o=>o!==op);savePendingOps();progressed=true;
+    }
+  }catch(e){/* 网络还没恢复，队列保留，下次再试 */}
+  window._syncing=false;
+  if(progressed){records=pending.concat(baseRecords);render();toast('☁️ 已自动补同步到云端');}
 }
 function persistLocal(){save(LS_LOCAL,{records,reactions});}
 async function createRecord(occurredAt){
   const rec={room_code:cfg.room||'local',author_id:cfg.deviceId,author_name:cfg.name||'我',occurred_at:new Date(occurredAt).toISOString()};
   if(isCloud()){
-    const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(rec)});
-    return out[0];
+    try{
+      const out=await api('poop_records',{method:'POST',headers:{'Prefer':'return=representation'},body:JSON.stringify(rec)});
+      return out[0];
+    }catch(e){
+      rec.id='local-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);
+      rec.pending=true;rec.created_at=new Date().toISOString();
+      pending.unshift(rec);savePending();records.unshift(rec);
+      return rec;
+    }
   }
   rec.id='local-'+Date.now()+'-'+Math.random().toString(36).slice(2,7);rec.created_at=new Date().toISOString();
   records.unshift(rec);persistLocal();return rec;
 }
 async function updateRecord(id,patch){
-  if(isCloud()){await api('poop_records?id=eq.'+id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(patch)});}
+  const pr=pending.find(x=>x.id===id);
+  if(pr){Object.assign(pr,patch);savePending();const r0=records.find(x=>x.id===id);if(r0)Object.assign(r0,patch);return;}
+  if(isCloud()){
+    try{await api('poop_records?id=eq.'+id,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(patch)});}
+    catch(e){
+      const r=records.find(x=>x.id===id);if(r)Object.assign(r,patch);
+      const ex=pendingOps.find(o=>o.type==='update'&&o.id===id);
+      if(ex)Object.assign(ex.patch,patch);else pendingOps.push({type:'update',id:id,patch:patch});
+      savePendingOps();toast('📥 网络不稳，修改已暂存，恢复后自动同步');
+    }
+  }
   else{const r=records.find(x=>x.id===id);if(r)Object.assign(r,patch);persistLocal();}
 }
 async function deleteRecord(id){
-  if(isCloud()){await api('poop_records?id=eq.'+id,{method:'DELETE'});}
-  else{records=records.filter(x=>x.id!==id);reactions=reactions.filter(x=>x.record_id!==id);persistLocal();}
+  if(pending.some(x=>x.id===id)){pending=pending.filter(x=>x.id!==id);savePending();records=records.filter(x=>x.id!==id);return;}
+  if(isCloud()){
+    try{await api('poop_records?id=eq.'+id,{method:'DELETE'});}
+    catch(e){pendingOps.push({type:'delete',id:id});savePendingOps();toast('📥 网络不稳，删除已暂存，恢复后自动同步');}
+    baseRecords=baseRecords.filter(x=>x.id!==id);records=records.filter(x=>x.id!==id);
+  }
+  else{records=records.filter(x=>x.id!==id);baseRecords=baseRecords.filter(x=>x.id!==id);reactions=reactions.filter(x=>x.record_id!==id);persistLocal();}
 }
 async function toggleReaction(rec,emoji){
   const mine=reactions.find(x=>x.record_id===rec.id&&x.reactor_id===cfg.deviceId&&x.emoji===emoji);
@@ -356,7 +412,7 @@ function openSheetRefreshChips(){const id=editingId;const note=document.getEleme
 
 /* ---------------- 事件绑定 ---------------- */
 document.getElementById('btnAdd').onclick=async()=>{
-  try{const rec=await createRecord(Date.now());toast('✅ 已记一笔！可以补一下这次的感觉');await fetchAll();openSheet(rec.id);}
+  try{const rec=await createRecord(Date.now());toast(rec.pending?'📥 网络不稳，已先存本地，恢复后自动同步':'✅ 已记一笔！可以补一下这次的感觉');await fetchAll();openSheet(rec.id);}
   catch(e){toast('保存失败，请检查联网配置');}
 };
 document.getElementById('btnRefresh').onclick=()=>{fetchAll();toast('已刷新');};
@@ -388,6 +444,11 @@ document.getElementById('btnSettings').onclick=()=>{
   document.getElementById('cfgUrl').value=cfg.url||'';
   document.getElementById('cfgKey').value=cfg.key||'';
   document.getElementById('cfgRoom').value=cfg.room||'';
+  if(typeof PRECONFIG!=='undefined'&&PRECONFIG){
+    if(!document.getElementById('cfgUrl').value)document.getElementById('cfgUrl').value=PRECONFIG.url;
+    if(!document.getElementById('cfgKey').value)document.getElementById('cfgKey').value=PRECONFIG.key;
+  }
+  document.getElementById('btnLocal').textContent=cfg.mode==='local'?'☁️ 退出本地试玩，恢复云端':'本地试玩模式';
   ss.classList.add('open');
 };
 document.getElementById('settingsClose').onclick=()=>ss.classList.remove('open');
@@ -397,9 +458,21 @@ document.getElementById('btnSaveCfg').onclick=async()=>{
   cfg.url=document.getElementById('cfgUrl').value.trim();
   cfg.key=document.getElementById('cfgKey').value.trim();
   cfg.room=document.getElementById('cfgRoom').value.trim();
+  if(cfg.url&&cfg.key)cfg.mode='cloud';
   save(LS_CFG,cfg);ss.classList.remove('open');toast(isCloud()?'正在连接云端…':'已保存（本地模式）');await fetchAll();
 };
-document.getElementById('btnLocal').onclick=()=>{cfg.url='';cfg.key='';cfg.room='';save(LS_CFG,cfg);ss.classList.remove('open');fetchAll();toast('已切换本地试玩模式');};
+document.getElementById('btnLocal').onclick=()=>{
+  if(cfg.mode==='local'){
+    cfg.mode='cloud';
+    if(typeof PRECONFIG!=='undefined'&&PRECONFIG&&!cfg.url){cfg.url=PRECONFIG.url;cfg.key=PRECONFIG.key;}
+    save(LS_CFG,cfg);ss.classList.remove('open');
+    toast(cfg.room?'正在恢复云端连接…':'已退出本地模式，还差一个配对码');
+    fetchAll();
+  }else{
+    cfg.mode='local';save(LS_CFG,cfg);ss.classList.remove('open');fetchAll();
+    toast('已切到本地试玩（云端配置已保留，设置里可一键切回）');
+  }
+};
 document.getElementById('btnExport').onclick=()=>{
   const head='时间,记录人,顺畅度,感觉,量,干湿,耗时,备注\n';
   const lines=records.map(r=>[new Date(r.occurred_at).toLocaleString(),r.author_name,r.smoothness||'',r.feeling||'',r.amount||'',r.texture||'',r.duration||'',(r.note||'').replace(/,/g,'，')].join(','));
@@ -410,6 +483,7 @@ document.getElementById('btnExport').onclick=()=>{
 fetchAll();
 setInterval(()=>{if(isCloud()&&!document.querySelector('.sheet.open'))fetchAll();},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&isCloud())fetchAll();});
+window.addEventListener('online',()=>{if(isCloud()){toast('网络已恢复，正在同步…');fetchAll();}});
 </script>
 </body>
 </html>
