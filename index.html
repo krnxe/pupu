@@ -78,6 +78,7 @@
       <button class="ghost" id="btnBackfill">🕐 补记一次</button>
       <button class="ghost" id="btnRefresh">🔄 刷新数据</button>
     </div>
+    <button class="ghost" id="btnInvite" style="width:100%;margin-top:8px">🔗 邀请对方（一键配对链接）</button>
     <div class="vs" style="margin-top:16px">
       <div class="who"><div class="small">我（<span id="myName1">我</span>）今日</div><div class="num" id="myToday">0</div></div>
       <div style="font-weight:800;color:var(--sub)">VS</div>
@@ -152,6 +153,31 @@
       <button class="ghost" id="btnExport">⬇️ 导出 CSV</button>
       <button class="ghost" id="btnLocal">本地试玩模式</button>
     </div>
+  </div>
+</div>
+
+<!-- 加入房间面板（打开邀请链接时自动弹出） -->
+<div class="sheet" id="joinSheet">
+  <div class="panel">
+    <b style="font-size:18px">🎉 收到邀请</b>
+    <div class="small" id="joinInfo" style="margin-top:6px"></div>
+    <div class="label">填你的昵称（对方看到的名字）</div>
+    <input id="joinName" placeholder="比如：宝宝">
+    <button class="primary" id="btnDoJoin">确认进入房间</button>
+    <div style="text-align:center;margin-top:8px"><button class="iconbtn" id="joinCancel">先不进，看看再说</button></div>
+    <div class="small" style="margin-top:8px">点确认后会自动连好云端、进入对方的房间，不用填任何地址和 Key。</div>
+  </div>
+</div>
+
+<!-- 分享邀请面板 -->
+<div class="sheet" id="shareSheet">
+  <div class="panel">
+    <b style="font-size:17px">🔗 邀请链接</b>
+    <div class="small" style="margin:6px 0">把这个链接发给对方。对方点开后只需填昵称、点「确认进入房间」就配对完成，地址、Key、房间号都已包含在链接里。</div>
+    <input id="shareLink" readonly>
+    <button class="primary" id="btnCopyShare">复制链接</button>
+    <div class="small" style="margin-top:8px">⚠️ 这个链接等于房间钥匙，只发给你要邀请的那个人，别发到群里或公开场合。</div>
+    <div style="text-align:center;margin-top:8px"><button class="iconbtn" id="shareClose">关闭</button></div>
   </div>
 </div>
 
@@ -479,8 +505,73 @@ document.getElementById('btnExport').onclick=()=>{
   const blob=new Blob(['\ufeff'+head+lines.join('\n')],{type:'text/csv'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='噗噗记录.csv';a.click();
 };
+/* ---------------- 邀请链接：一键配对 ---------------- */
+function b64e(obj){
+  const bytes=new TextEncoder().encode(JSON.stringify(obj));
+  let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64d(str){
+  const bin=atob(str.replace(/-/g,'+').replace(/_/g,'/'));
+  const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+function buildInviteLink(){
+  const payload={u:cfg.url||'',k:cfg.key||'',r:cfg.room||'',n:cfg.name||''};
+  return location.origin+location.pathname+'#join='+b64e(payload);
+}
+let inviteData=null;
+function checkInvite(){
+  if(!location.hash.startsWith('#join='))return;
+  try{inviteData=b64d(location.hash.slice(6));}catch(e){inviteData=null;return;}
+  if(!inviteData||!inviteData.r)return;
+  const from=inviteData.n?('「'+inviteData.n+'」'):'对方';
+  document.getElementById('joinInfo').innerHTML=from+' 邀请你加入房间 <b>'+esc(inviteData.r)+'</b>'+
+    (cfg.room&&cfg.room!==inviteData.r?'<br>⚠️ 你当前在房间 '+esc(cfg.room)+'，确认后将切换到这个新房间。':'');
+  document.getElementById('joinName').value=cfg.name||'';
+  document.getElementById('joinSheet').classList.add('open');
+}
+document.getElementById('btnDoJoin').onclick=()=>{
+  if(!inviteData)return;
+  const name=document.getElementById('joinName').value.trim();
+  if(!name){toast('先填一下你的昵称');document.getElementById('joinName').focus();return;}
+  if(inviteData.u)cfg.url=inviteData.u;
+  if(inviteData.k)cfg.key=inviteData.k;
+  cfg.room=inviteData.r;cfg.name=name;cfg.mode='cloud';cfg.preconfigured=true;
+  save(LS_CFG,cfg);
+  history.replaceState(null,'',location.pathname+location.search);
+  document.getElementById('joinSheet').classList.remove('open');
+  inviteData=null;
+  toast('🎉 已进入房间，正在连接云端…');
+  fetchAll();
+};
+document.getElementById('joinCancel').onclick=()=>{
+  document.getElementById('joinSheet').classList.remove('open');
+  history.replaceState(null,'',location.pathname+location.search);
+  inviteData=null;
+};
+const shareSheet=document.getElementById('shareSheet');
+document.getElementById('btnInvite').onclick=async()=>{
+  if(!cfg.url||!cfg.key||!cfg.room){toast('先在设置里连好云端并生成/填好配对码，再来生成邀请');return;}
+  const link=buildInviteLink();
+  const text='来和我一起用噗噗大作战💩 点开链接，填昵称点确认就能加入：'+link;
+  if(navigator.share){
+    try{await navigator.share({title:'噗噗大作战邀请',text:text,url:link});return;}
+    catch(e){/* 用户取消分享时落到复制面板 */}
+  }
+  document.getElementById('shareLink').value=link;
+  shareSheet.classList.add('open');
+};
+document.getElementById('btnCopyShare').onclick=async()=>{
+  const inp=document.getElementById('shareLink');inp.select();
+  try{await navigator.clipboard.writeText(inp.value);toast('✅ 邀请链接已复制，去微信粘贴发给对方');}
+  catch(e){document.execCommand&&document.execCommand('copy');toast('已选中链接，长按复制也可');}
+};
+document.getElementById('shareClose').onclick=()=>shareSheet.classList.remove('open');
+
 /* 启动 + 自动刷新 */
 fetchAll();
+checkInvite();
 setInterval(()=>{if(isCloud()&&!document.querySelector('.sheet.open'))fetchAll();},15000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&isCloud())fetchAll();});
 window.addEventListener('online',()=>{if(isCloud()){toast('网络已恢复，正在同步…');fetchAll();}});
